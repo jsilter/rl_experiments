@@ -5,15 +5,15 @@ Intended to demonstrate usage of `trainers` and `callbacks`.
 
 import os
 import time
-from typing import Callable
+from typing import Type
 
 import gym
-from ray import tune
 import torch
+from ray import tune
 from torch import nn
 
+from callbacks import DecayParameter, TensorboardCallback
 from trainers import DoubleDQN, SimplePolicyGradient
-from callbacks import TensorboardCallback, DecayParameter
 
 DEVICE = "cpu"
 if torch.cuda.is_available():
@@ -68,7 +68,7 @@ def build_network(
 
 
 def train_example(
-    trainer_class: Callable,
+    trainer_class: Type,
     env_name: str,
     train_kwargs,
     eps_dict=None,
@@ -155,8 +155,8 @@ if __name__ == "__main__":
     # "Acrobot-v1", "CartPole-v1", "MountainCar-v0"
     ENV_NAME = "CartPole-v1"
 
-    use_trainer_class = DoubleDQN
-    trainer_name = use_trainer_class.__name__
+    TrainerClass = DoubleDQN
+    trainer_name = TrainerClass.__name__
 
     if trainer_name == "SimplePolicyGradient":
         # These work well for SimplePolicyGradient cartpole
@@ -202,7 +202,7 @@ if __name__ == "__main__":
     DO_RUN = True
     if DO_TRAIN:
         main_network = train_example(
-            use_trainer_class,
+            TrainerClass,
             ENV_NAME,
             use_train_kwargs,
             eps_dict=use_eps_dict,
