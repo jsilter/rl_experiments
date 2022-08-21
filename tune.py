@@ -13,7 +13,7 @@ if __name__ == "__main__":
     epochs = 800
     # TrainerClass = SimplePolicyGradient
     # epochs = 4000
-    
+
     search_space = {
         "lr": tune.grid_search([1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2]),
     }

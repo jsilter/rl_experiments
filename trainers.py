@@ -5,6 +5,7 @@ See the `Trainer` class for details."""
 
 import abc
 import copy
+import functools
 import random
 from abc import ABC
 from collections import deque
@@ -15,90 +16,6 @@ import torch
 from torch import nn
 from torch.distributions import Categorical
 from tqdm import tqdm
-
-from callbacks import Callback
-
-
-def choose_action_greedy(
-    state: Union[np.ndarray, torch.Tensor],
-    network: nn.Module,
-    ind_to_action: Callable = None,
-) -> int:
-    """
-    Given a state and a neural network, choose the next action greedily
-    by selecting the action with the highest probability.
-    Args:
-        state: Observed state of the environment
-        network: Torch network used for selecting action.
-        ind_to_action: function which maps from the neural network indexes
-            to an action (in case the action indexing and values are different).
-            By default, the neural network index will be returned.
-
-    Returns:
-        action to take
-    """
-    if isinstance(state, np.ndarray):
-        state = torch.from_numpy(state)
-    logits = network(state)
-    action_ind = np.argmax(logits).item()
-    action = action_ind
-    if ind_to_action is not None:
-        action = ind_to_action(action_ind)
-    return action
-
-
-def choose_action_sample(
-    state: Union[np.ndarray, torch.Tensor],
-    network: nn.Module,
-    ind_to_action: Callable = None,
-) -> int:
-    """
-    Given a state and a neural network, choose next action by sampling.
-
-    We treat the `network` outputs as logits, and sample from the distribution
-    according to those probabilities.
-    Args:
-        state: Observed state of the environment
-        network: Torch network used for selecting action.
-        ind_to_action: function which maps from the neural network indexes
-            to an action (in case the action indexing and values are different).
-            By default, the neural network index will be returned.
-
-    Returns:
-        action to take
-    """
-    if isinstance(state, np.ndarray):
-        state = torch.from_numpy(state)
-    action_dist = get_policy_discrete(state, network)
-    action_ind = action_dist.sample().item()
-    action = action_ind
-    if ind_to_action is not None:
-        action = ind_to_action(action_ind)
-    return action
-
-
-def get_policy_discrete(
-    state: Union[np.ndarray, torch.Tensor], network: nn.Module
-) -> torch.distributions.Distribution:
-    """
-    Get the policy for this network
-
-    The 'policy' is a probability distribution over choices.
-    For discrete options, this will be a Categorical distribution.
-
-    Args:
-        state: Observed environment state
-        network: Neural network used for choosing action.
-        The output of this network is treated as logits.
-
-    Returns:
-        A distribution over choices.
-    """
-    if isinstance(state, np.ndarray):
-        state = torch.from_numpy(state)
-    logits = network(state)
-    action_dist = Categorical(logits=logits)
-    return action_dist
 
 
 class Trainer(ABC):
@@ -115,15 +32,12 @@ class Trainer(ABC):
          `reset` and `step` .
         network (nn.Module): The network being trained
         optimizer (torch.optim.Optimizer): The `optimizer` used for training.
-        memory (Any): Default None. Here for subclasses that want to use a memory.
-            The exact usage of that memory is left to subclasses.
         train_kwargs (Dict):
             The dictionary of keyword arguments passed to `trained_epoch`
         ind_to_action (Callable):
             Maps output of `network` to an action used in `env.step`.
             Default is to use the output directly.
-        callbacks (Sequence[Callback]): S
-            equence of `Callback`s used during training.
+        callbacks (Sequence[Callback]): Sequence of `Callback`s used during training.
 
 
     Example:
@@ -148,7 +62,6 @@ class Trainer(ABC):
         self.network = network
         self.target_network = copy.deepcopy(network)
         self.optimizer = optimizer
-        self.memory = None
         self.train_kwargs = {}
         self.ind_to_action = ind_to_action
         self.callbacks = []
@@ -198,6 +111,36 @@ class Trainer(ABC):
 
         return self.network
 
+    def choose_action(
+        self, state: Union[np.ndarray, torch.Tensor], epsilon: float = 0.0
+    ) -> int:
+        """
+        Choose action based on the state.
+
+        The default implementation is epsilon-greedy.
+        With probability `epsilon`, we sample an action at random.
+        Otherwise, we pick the action with the highest probability.
+
+        If the trainer has `ind_to_action` defined, it will be used to map
+        the output of the network to an action.
+        Args:
+            state: Observed state.
+            epsilon: Chance of picking a random action. Default 0.0 (always greedy).
+        Returns:
+            action suitable for env.step.
+        """
+        if random.random() < epsilon:
+            action = self.env.action_space.sample()
+        else:
+            if isinstance(state, np.ndarray):
+                state = torch.from_numpy(state)
+            logits = self.network(state)
+            action = np.argmax(logits).item()
+            if self.ind_to_action is not None:
+                action = self.ind_to_action(action)
+
+        return action
+
     @abc.abstractmethod
     def train_epoch(self, *args, **kwargs):
         """Train for a single epoch.
@@ -219,10 +162,11 @@ class DoubleDQN(Trainer):
     actions via epsilon-greedy method.
     """
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.memory = DoubleDQN.ExperienceReplayMemory()
+
     def on_train_start(self):
-        """Initialize and/or clear memory buffer"""
-        if self.memory is None:
-            self.memory = DoubleDQN.ExperienceReplayMemory()
         self.memory.clear()
         return super().on_train_start()
 
@@ -237,6 +181,42 @@ class DoubleDQN(Trainer):
             self.target_network.load_state_dict(self.network.state_dict())
 
         return super().on_epoch_end(epoch_num, epoch_results)
+
+    @functools.lru_cache(maxsize=128)
+    def __get_update_funcs(self, batch_size):
+        loss_obj = nn.MSELoss()
+        batch_inds = np.arange(batch_size)
+        return batch_inds, loss_obj
+
+    def _update_network(self, batch_size: int, gamma: float):
+        """Perform a single update step on the network"""
+        batch_inds, loss_obj = self.__get_update_funcs(batch_size)
+
+        sample_tuple = self.memory.sample(batch_size)
+        b_states, b_actions, b_rewards, b_succs, b_dones = sample_tuple
+
+        # Update value function
+        with torch.no_grad():
+            network_actions = torch.argmax(self.network(b_succs), dim=1)
+            all_target_values = self.target_network(b_succs)
+            sel_target_values = all_target_values[batch_inds, network_actions]
+
+            final_mod = 1 - b_dones.to(int)
+            tot_target_values = b_rewards + final_mod * gamma * sel_target_values
+
+        # Calculate the predicted Q(state, action) values,
+        # and update the network.
+        network_outs = self.network(b_states)
+        predicted_value = network_outs[batch_inds, b_actions]
+
+        loss_tensor = loss_obj(predicted_value, tot_target_values)
+        current_loss = loss_tensor.item()
+
+        self.optimizer.zero_grad()
+        loss_tensor.backward()
+        self.optimizer.step()
+
+        return current_loss
 
     def train_epoch(
         self,
@@ -262,58 +242,33 @@ class DoubleDQN(Trainer):
         """
 
         state = self.env.reset()
-        action_space = self.env.action_space
-        b_idx = np.arange(batch_size)
-
-        loss_obj = nn.MSELoss()
-
         done = False
         epoch_results = {"steps": 0, "total_reward": 0.0, "mean_loss": 0.0}
         step_iter = 0
         total_reward = total_loss = 0.0
         while not done:
-            with torch.no_grad():
-                if random.random() < epsilon:
-                    action = action_space.sample()
-                else:
-                    action = choose_action_greedy(
-                        state, self.network, self.ind_to_action
-                    )
 
+            with torch.no_grad():
+                action = self.choose_action(state, epsilon)
+
+            # Take step and keep track of reward
             succ_state, reward, done, _ = self.env.step(action)
             total_reward += reward
             if max_steps is not None:
                 # Treat hitting the maximum as a regular end of episode
                 done &= step_iter < max_steps
 
+            # Record transition in memory
             self.memory.append(state, action, reward, succ_state, done)
             state = succ_state.copy()
             if len(self.memory) < batch_size:
                 continue
 
-            sample_tuple = self.memory.sample(batch_size)
-            b_states, b_actions, b_rewards, b_succs, b_dones = sample_tuple
+            # Perform gradient update on network,
+            # using our memory buffer.
+            current_loss = self._update_network(batch_size, gamma)
 
-            # Update value function
-            with torch.no_grad():
-                network_actions = torch.argmax(self.network(b_succs), dim=1)
-                all_target_values = self.target_network(b_succs)
-                sel_target_values = all_target_values[b_idx, network_actions]
-
-                final_mod = 1 - b_dones.to(int)
-                tot_target_values = b_rewards + final_mod * gamma * sel_target_values
-
-            # Calculate the predicted Q(state, action) values
-            network_outs = self.network(b_states)
-            predicted_value = network_outs[b_idx, b_actions]
-
-            loss_tensor = loss_obj(predicted_value, tot_target_values)
-            total_loss += loss_tensor.item()
-
-            self.optimizer.zero_grad()
-            loss_tensor.backward()
-            self.optimizer.step()
-
+            total_loss += current_loss
             step_iter += 1
 
         epoch_results["steps"] = step_iter
@@ -445,15 +400,81 @@ class SimplePolicyGradient(Trainer):
     https://archive.ph/sGRbS
     """
 
-    def on_train_start(self):
-        if self.memory is None:
-            self.memory = SimplePolicyGradient.EpisodicMemory()
-        self.memory.clear()
-        return super().on_train_start()
+    def get_policy_discrete(
+        self, state: Union[np.ndarray, torch.Tensor]
+    ) -> torch.distributions.Distribution:
+        """
+        Get the policy for this network
+
+        The 'policy' is a probability distribution over choices.
+        For discrete options, this will be a Categorical distribution.
+
+        Args:
+            state: Observed environment state
+
+        Returns:
+            A distribution over choices.
+        """
+        if isinstance(state, np.ndarray):
+            state = torch.from_numpy(state)
+        logits = self.network(state)
+        action_dist = Categorical(logits=logits)
+        return action_dist
+
+    def choose_action(self, state: np.ndarray, epsilon: float = 0.0) -> int:
+        """
+        Choose action based on the state.
+
+        With probability `epsilon`, we sample an action at random.
+        Otherwise, we choose an action based on sampling.
+        The output values of `self.network` are treated as logits.
+
+        If the trainer has `ind_to_action` defined, it will be used to map
+        the output of the network to an action.
+        Args:
+            state: Observed state.
+            epsilon: Chance of picking a random action.
+                Default 0.0 (aka always use the network logits).
+        Returns:
+            action suitable for env.step.
+        """
+        if random.random() < epsilon:
+            action = self.env.action_space.sample()
+        else:
+            if isinstance(state, np.ndarray):
+                state = torch.from_numpy(state)
+            action_dist = self.get_policy_discrete(state)
+            action = action_dist.sample().item()
+
+        if self.ind_to_action is not None:
+            action = self.ind_to_action(action)
+        return action
+
+    def _update_network(self, memory: "SimplePolicyGradient.EpisodicMemory"):
+        """Perform an update step
+
+        Retrieve transitions from memory,
+        calculate log-loss,
+        calculate gradients,
+        take optimizer step.
+        """
+
+        sample_tuple = memory.get_all()
+        b_states, b_actions, b_weights = sample_tuple
+
+        # Compute the loss
+        logp = self.get_policy_discrete(b_states).log_prob(b_actions)
+        loss_tensor = -1 * (logp * b_weights).mean()
+        loss_value = loss_tensor.item()
+
+        self.optimizer.zero_grad()
+        loss_tensor.backward()
+        self.optimizer.step()
+
+        return loss_value
 
     def train_epoch(
         self,
-        gamma: float = 1.0,
         batch_size: int = 150,
         epsilon: float = 0.0,
         max_steps_per_episode: int = None,
@@ -467,8 +488,6 @@ class SimplePolicyGradient(Trainer):
         then do an update step.
 
         Args:
-            gamma: Time discount parameter.
-                value(t) = reward + gamma*value(t+1)
             batch_size: Batch size used for episodic memory.
             epsilon: epsilon used in epsilon-greedy.
                 Default is 0, which is pure-greedy.
@@ -479,8 +498,7 @@ class SimplePolicyGradient(Trainer):
             though they will not be used.
         """
 
-        self.memory.clear()
-        action_space = self.env.action_space
+        memory = SimplePolicyGradient.EpisodicMemory()
 
         epoch_results = {"steps": 0, "total_reward": 0.0, "mean_loss": 0.0}
         total_steps = 0
@@ -498,14 +516,11 @@ class SimplePolicyGradient(Trainer):
             states = []
             actions = []
             while not episode_done:
+                # Choose action
                 with torch.no_grad():
-                    if random.random() < epsilon:
-                        action = action_space.sample()
-                    else:
-                        action = choose_action_sample(
-                            state, self.network, self.ind_to_action
-                        )
+                    action = self.choose_action(state, epsilon)
 
+                # Take step
                 succ_state, reward, episode_done, _ = self.env.step(action)
                 episode_reward += reward
 
@@ -519,24 +534,16 @@ class SimplePolicyGradient(Trainer):
                     # Treat hitting the maximum as a regular end of episode
                     episode_done &= step_iter < max_steps_per_episode
 
-            self.memory.add_episode(states, actions, episode_reward)
+            memory.add_episode(states, actions, episode_reward)
             total_steps += step_iter
             total_reward += episode_reward
 
             # Stop once our memory buffer has enough
-            epoch_done = len(self.memory) >= batch_size
+            epoch_done = len(memory) >= batch_size
 
-        sample_tuple = self.memory.get_all()
-        b_states, b_actions, b_weights = sample_tuple
-
-        # Compute the loss
-        logp = get_policy_discrete(b_states, self.network).log_prob(b_actions)
-        loss_tensor = -1 * (logp * b_weights).mean()
-        total_loss += loss_tensor.item()
-
-        self.optimizer.zero_grad()
-        loss_tensor.backward()
-        self.optimizer.step()
+        # Update network
+        current_loss = self._update_network(memory)
+        total_loss += current_loss
 
         epoch_results["steps"] = total_steps
         epoch_results["total_reward"] = total_reward

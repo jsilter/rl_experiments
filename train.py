@@ -155,15 +155,15 @@ if __name__ == "__main__":
     # "Acrobot-v1", "CartPole-v1", "MountainCar-v0"
     ENV_NAME = "CartPole-v1"
 
-    TrainerClass = DoubleDQN
+    # TrainerClass = DoubleDQN
+    TrainerClass = SimplePolicyGradient
     trainer_name = TrainerClass.__name__
 
     if trainer_name == "SimplePolicyGradient":
         # These work well for SimplePolicyGradient cartpole
         cp_train_kwargs = {
-            "epochs": 2000,
+            "epochs": 4000,
             "lr": 1e-4,
-            "gamma": 0.99,
         }
         cp_eps_dict = {
             "name": "epsilon",
@@ -179,7 +179,7 @@ if __name__ == "__main__":
         cp_train_kwargs = {
             "epochs": 400,
             "lr": 1e-4,
-            "gamma": 0.99,
+            "gamma": 0.7,
         }
         cp_eps_dict = {
             "name": "epsilon",
@@ -198,7 +198,7 @@ if __name__ == "__main__":
 
     network_path = f"{trainer_name}_{ENV_NAME.lower()}_latest.pt"
     log_dir = os.path.join("logs", trainer_name, ENV_NAME)
-    DO_TRAIN = False or not os.path.exists(network_path)
+    DO_TRAIN = True or not os.path.exists(network_path)
     DO_RUN = True
     if DO_TRAIN:
         main_network = train_example(
@@ -213,6 +213,6 @@ if __name__ == "__main__":
     if DO_RUN:
         main_network = torch.load(network_path)
         n_steps, outer_total_reward = run_env(ENV_NAME, main_network, verbose=True)
-        p_str = f"Finished {ENV_NAME} after {n_steps} steps."
+        p_str = f"Finished {trainer_name} - {ENV_NAME} after {n_steps} steps."
         p_str += f"  Total reward {outer_total_reward}"
         print(p_str)
