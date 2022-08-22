@@ -177,9 +177,9 @@ if __name__ == "__main__":
     elif trainer_name == "DoubleDQN":
         # These work well for DoubleDQN cartpole
         cp_train_kwargs = {
-            "epochs": 400,
+            "epochs": 250,
             "lr": 1e-4,
-            "gamma": 0.7,
+            "gamma": 0.99,
         }
         cp_eps_dict = {
             "name": "epsilon",

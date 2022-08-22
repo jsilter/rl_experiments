@@ -292,11 +292,13 @@ class DoubleDQN(Trainer):
         """
 
         def __init__(
-            self, max_length: int = 100_000, float_type: torch.dtype = torch.float64
+            self, max_length: int = 10_000, float_type: torch.dtype = torch.float64
         ):
             """
             Args:
-                max_length: Maximum size of the memory buffer
+                max_length: Maximum size of the memory buffer. Default 10k.
+                    This parameter shouldn't matter too much. It should also
+                    probably be bigger, but I was having memory issues.
                 float_type: torch.dtype to using for floating points
             """
             self.max_length = max_length
@@ -501,9 +503,11 @@ class SimplePolicyGradient(Trainer):
         memory = SimplePolicyGradient.EpisodicMemory()
 
         epoch_results = {"steps": 0, "total_reward": 0.0, "mean_loss": 0.0}
+        epoch_results.update({"mean_reward": 0.0, "num_episodes": 0})
         total_steps = 0
         total_reward = 0
         total_loss = 0
+        num_episodes = 0
 
         # We loop through many episodes until our memory buffer is full,
         # and define those N-episodes as an epoch.
@@ -537,6 +541,7 @@ class SimplePolicyGradient(Trainer):
             memory.add_episode(states, actions, episode_reward)
             total_steps += step_iter
             total_reward += episode_reward
+            num_episodes += 1
 
             # Stop once our memory buffer has enough
             epoch_done = len(memory) >= batch_size
@@ -547,6 +552,8 @@ class SimplePolicyGradient(Trainer):
 
         epoch_results["steps"] = total_steps
         epoch_results["total_reward"] = total_reward
+        epoch_results["num_episodes"] = num_episodes
+        epoch_results["mean_reward"] = total_reward / num_episodes
         if total_steps > 0:
             epoch_results["mean_loss"] = total_loss / total_steps
 
