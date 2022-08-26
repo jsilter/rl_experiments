@@ -24,7 +24,7 @@ def build_network(
     input_size: int,
     output_size: int,
     hidden_layers=2,
-    hdim=64,
+    hdim=128,
     activation: nn.Module = nn.ReLU,
 ) -> nn.Module:
     """
@@ -71,7 +71,7 @@ def train_example(
     trainer_class: Type,
     env_name: str,
     train_kwargs,
-    eps_dict=None,
+    decay_parameters=(),
     log_dir=None,
     checkpoint_dir=None,
 ):
@@ -99,8 +99,9 @@ def train_example(
         tboard_callback = TensorboardCallback(log_dir)
         callbacks = [tboard_callback]
 
-    if eps_dict:
-        callbacks.append(DecayParameter(**eps_dict))
+    if decay_parameters:
+        for dp in decay_parameters:
+            callbacks.append(DecayParameter(**dp))
 
     # Train my network
     trainer = trainer_class(env, network, optimizer, callbacks=callbacks)
@@ -153,59 +154,68 @@ def run_env(env_name, network, verbose=False):
 if __name__ == "__main__":
     # Classic control environments with discrete action spaces:
     # "Acrobot-v1", "CartPole-v1", "MountainCar-v0"
-    ENV_NAME = "CartPole-v1"
+    ENV_NAME = "Acrobot-v1"
+    # ENV_NAME = "CartPole-v1"
 
-    # TrainerClass = DoubleDQN
-    TrainerClass = SimplePolicyGradient
+    TrainerClass = DoubleDQN
+    # TrainerClass = SimplePolicyGradient
     trainer_name = TrainerClass.__name__
 
+    decay_parameters = []
+
     if trainer_name == "SimplePolicyGradient":
-        # These work well for SimplePolicyGradient cartpole
-        cp_train_kwargs = {
+
+        train_kwargs = {
             "epochs": 4000,
             "lr": 1e-4,
         }
-        cp_eps_dict = {
+
+        eps_dict = {
             "name": "epsilon",
             "init": 0.50,
             "decay": 0.98,
             "min_value": 0.01,
         }
 
-        use_train_kwargs = cp_train_kwargs
-        use_eps_dict = cp_eps_dict
+        temp_dict = {
+            "name": "temperature",
+            "init": 5.0,
+            "decay": 0.988,
+            "min_value": 1.0,
+        }
+
+        decay_parameters.append(temp_dict)
+        # decay_parameters.append(eps_dict)
+
     elif trainer_name == "DoubleDQN":
-        # These work well for DoubleDQN cartpole
-        cp_train_kwargs = {
-            "epochs": 250,
-            "lr": 1e-4,
+        train_kwargs = {
+            "epochs": 800,
+            "lr": 1e-3,
             "gamma": 0.99,
         }
-        cp_eps_dict = {
-            "name": "epsilon",
-            "init": 0.50,
-            "decay": 0.98,
-            "min_value": 0.01,
+        temp_dict = {
+            "name": "temperature",
+            "init": 5.0,
+            "decay": 0.988,
+            "min_value": 0.0,
         }
-
-        use_train_kwargs = cp_train_kwargs
-        use_eps_dict = cp_eps_dict
+        decay_parameters = [temp_dict]
 
     if ENV_NAME == "Acrobot-v1":
         pass
     elif ENV_NAME == "MountainCar-v0":
         pass
 
-    network_path = f"{trainer_name}_{ENV_NAME.lower()}_latest.pt"
+    network_path = f"{trainer_name}_{ENV_NAME}_latest.pt"
     log_dir = os.path.join("logs", trainer_name, ENV_NAME)
-    DO_TRAIN = True or not os.path.exists(network_path)
+    DO_TRAIN = False or not os.path.exists(network_path)
     DO_RUN = True
     if DO_TRAIN:
         main_network = train_example(
             TrainerClass,
             ENV_NAME,
-            use_train_kwargs,
-            eps_dict=use_eps_dict,
+            train_kwargs,
+            decay_parameters=decay_parameters,
             log_dir=log_dir,
         )
         torch.save(main_network, network_path)

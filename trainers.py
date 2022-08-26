@@ -89,6 +89,7 @@ class Trainer(ABC):
             callback.on_epoch_start(epoch_num)
 
     def on_epoch_end(self, epoch_num: int, epoch_results: Dict):
+        epoch_results.update(self.train_kwargs)
         for callback in self.callbacks:
             callback.on_epoch_end(epoch_num, epoch_results)
 
@@ -111,13 +112,15 @@ class Trainer(ABC):
 
         return self.network
 
-    def choose_action(
-        self, state: Union[np.ndarray, torch.Tensor], epsilon: float = 0.0
+    def choose_action_greedy(
+        self,
+        state: Union[np.ndarray, torch.Tensor],
+        epsilon: float = 0.0,
     ) -> int:
         """
-        Choose action based on the state.
+        Choose action greedily based on the state.
 
-        The default implementation is epsilon-greedy.
+        This method is epsilon-greedy.
         With probability `epsilon`, we sample an action at random.
         Otherwise, we pick the action with the highest probability.
 
@@ -125,7 +128,7 @@ class Trainer(ABC):
         the output of the network to an action.
         Args:
             state: Observed state.
-            epsilon: Chance of picking a random action. Default 0.0 (always greedy).
+            epsilon: Chance of picking a random action. Default 0.0 (always greedy)
         Returns:
             action suitable for env.step.
         """
@@ -140,6 +143,75 @@ class Trainer(ABC):
                 action = self.ind_to_action(action)
 
         return action
+
+    def get_policy_discrete(
+        self, state: Union[np.ndarray, torch.Tensor], temperature=1.0
+    ) -> torch.distributions.Distribution:
+        """
+        Get the policy for this network
+
+        The 'policy' is a probability distribution over choices.
+        For discrete options, this will be a Categorical distribution.
+
+        Args:
+            state: Observed environment state
+            temperature: Temperature to use to modify logits.
+
+        Returns:
+            A distribution over choices.
+        """
+        if isinstance(state, np.ndarray):
+            state = torch.from_numpy(state)
+        logits = self.network(state)
+        temperature = max(1e-8, temperature)
+        logits /= temperature
+        action_dist = Categorical(logits=logits)
+        return action_dist
+
+    def choose_action_sample(
+        self, state: np.ndarray, epsilon: float = 0.0, temperature=1.0
+    ) -> int:
+        """
+        Choose action based on the state.
+
+        With probability `epsilon`, we sample an action at random.
+        Otherwise, we choose an action based on sampling.
+        The output values of `self.network` are treated as logits.
+
+        If the trainer has `ind_to_action` defined, it will be used to map
+        the output of the network to an action.
+        Args:
+            state: Observed state.
+            epsilon: Chance of picking a random action.
+                Default 0.0 (aka always use the network logits).
+            temperature: Temperature to apply to logits.
+                Default 1.0 (aka leave untouched).
+        Returns:
+            action suitable for env.step.
+        """
+        if random.random() < epsilon:
+            action = self.env.action_space.sample()
+        else:
+            if isinstance(state, np.ndarray):
+                state = torch.from_numpy(state)
+            action_dist = self.get_policy_discrete(state, temperature=temperature)
+            action = action_dist.sample().item()
+
+        if self.ind_to_action is not None:
+            action = self.ind_to_action(action)
+        return action
+
+    def choose_action(
+        self,
+        state: Union[np.ndarray, torch.Tensor],
+        epsilon: float = 0.0,
+        temperature: float = 0.0,
+    ) -> int:
+        """Choose action based on state. Default implementation is epsilon-greedy."""
+        if temperature == 0:
+            return self.choose_action_greedy(state, epsilon)
+        else:
+            return self.choose_action_sample(state, epsilon, temperature)
 
     @abc.abstractmethod
     def train_epoch(self, *args, **kwargs):
@@ -221,8 +293,9 @@ class DoubleDQN(Trainer):
     def train_epoch(
         self,
         gamma: float = 1.0,
-        batch_size: int = 150,
+        batch_size: int = 256,
         epsilon: float = 0.0,
+        temperature: float = 0.0,
         max_steps: int = None,
         **kwargs,
     ):  # pylint: disable=unused-argument
@@ -234,6 +307,8 @@ class DoubleDQN(Trainer):
             batch_size: Batch size used for experience replay
             epsilon: epsilon used in epsilon-greedy.
                 Default is 0, which is pure-greedy.
+            temperature: Temperature used in action sampling.
+                Default is 0.0, which is pure greedy.
             max_steps: Maximum steps per epoch.
                 Default is None, we let the epoch run until the environment says
                 it's done.
@@ -249,7 +324,7 @@ class DoubleDQN(Trainer):
         while not done:
 
             with torch.no_grad():
-                action = self.choose_action(state, epsilon)
+                action = self.choose_action(state, epsilon, temperature)
 
             # Take step and keep track of reward
             succ_state, reward, done, _ = self.env.step(action)
@@ -402,57 +477,9 @@ class SimplePolicyGradient(Trainer):
     https://archive.ph/sGRbS
     """
 
-    def get_policy_discrete(
-        self, state: Union[np.ndarray, torch.Tensor]
-    ) -> torch.distributions.Distribution:
-        """
-        Get the policy for this network
-
-        The 'policy' is a probability distribution over choices.
-        For discrete options, this will be a Categorical distribution.
-
-        Args:
-            state: Observed environment state
-
-        Returns:
-            A distribution over choices.
-        """
-        if isinstance(state, np.ndarray):
-            state = torch.from_numpy(state)
-        logits = self.network(state)
-        action_dist = Categorical(logits=logits)
-        return action_dist
-
-    def choose_action(self, state: np.ndarray, epsilon: float = 0.0) -> int:
-        """
-        Choose action based on the state.
-
-        With probability `epsilon`, we sample an action at random.
-        Otherwise, we choose an action based on sampling.
-        The output values of `self.network` are treated as logits.
-
-        If the trainer has `ind_to_action` defined, it will be used to map
-        the output of the network to an action.
-        Args:
-            state: Observed state.
-            epsilon: Chance of picking a random action.
-                Default 0.0 (aka always use the network logits).
-        Returns:
-            action suitable for env.step.
-        """
-        if random.random() < epsilon:
-            action = self.env.action_space.sample()
-        else:
-            if isinstance(state, np.ndarray):
-                state = torch.from_numpy(state)
-            action_dist = self.get_policy_discrete(state)
-            action = action_dist.sample().item()
-
-        if self.ind_to_action is not None:
-            action = self.ind_to_action(action)
-        return action
-
-    def _update_network(self, memory: "SimplePolicyGradient.EpisodicMemory"):
+    def _update_network(
+        self, memory: "SimplePolicyGradient.EpisodicMemory", temperature: float
+    ):
         """Perform an update step
 
         Retrieve transitions from memory,
@@ -465,7 +492,7 @@ class SimplePolicyGradient(Trainer):
         b_states, b_actions, b_weights = sample_tuple
 
         # Compute the loss
-        logp = self.get_policy_discrete(b_states).log_prob(b_actions)
+        logp = self.get_policy_discrete(b_states, temperature).log_prob(b_actions)
         loss_tensor = -1 * (logp * b_weights).mean()
         loss_value = loss_tensor.item()
 
@@ -479,6 +506,7 @@ class SimplePolicyGradient(Trainer):
         self,
         batch_size: int = 150,
         epsilon: float = 0.0,
+        temperature: float = 1.0,
         max_steps_per_episode: int = None,
         **kwargs,
     ):  # pylint: disable=unused-argument
@@ -491,8 +519,10 @@ class SimplePolicyGradient(Trainer):
 
         Args:
             batch_size: Batch size used for episodic memory.
-            epsilon: epsilon used in epsilon-greedy.
-                Default is 0, which is pure-greedy.
+            epsilon: epsilon used in epsilon-random.
+                Default is 0, which samples by treating the network outputs as logits
+            temperature: Temperature used in sampling.
+                Default is 1, which treats the network outputs as logits without modification.
             max_steps_per_episode: Maximum steps per episode.
                 (episode, not epoch).
                 Default is None, we continue training until the memory is full.
@@ -522,7 +552,7 @@ class SimplePolicyGradient(Trainer):
             while not episode_done:
                 # Choose action
                 with torch.no_grad():
-                    action = self.choose_action(state, epsilon)
+                    action = self.choose_action(state, epsilon, temperature)
 
                 # Take step
                 succ_state, reward, episode_done, _ = self.env.step(action)
@@ -547,7 +577,7 @@ class SimplePolicyGradient(Trainer):
             epoch_done = len(memory) >= batch_size
 
         # Update network
-        current_loss = self._update_network(memory)
+        current_loss = self._update_network(memory, temperature)
         total_loss += current_loss
 
         epoch_results["steps"] = total_steps
