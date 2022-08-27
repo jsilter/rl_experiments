@@ -3,6 +3,7 @@ __doc__ = """ Script used for training models.
 Intended to demonstrate usage of `trainers` and `callbacks`.
 """
 
+import datetime
 import os
 import time
 from typing import Type
@@ -104,7 +105,8 @@ def train_example(
             callbacks.append(DecayParameter(**dp))
 
     # Train my network
-    trainer = trainer_class(env, network, optimizer, callbacks=callbacks)
+    trainer = trainer_class(env, network, optimizer, callbacks=callbacks,
+                            loss=train_kwargs.pop("loss", None))
     # trainer = DoubleDQNTrainer(env, network, optimizer, callbacks=callbacks)
     # trainer = SimplePolicyGradient(env, network, optimizer, callbacks=callbacks)
 
@@ -133,7 +135,9 @@ def run_env(env_name, network, verbose=False):
     c_steps = c_total_reward = 0
     while not done:
         q_values = network(torch.tensor(state))
-        action = torch.argmax(q_values).item()
+        # Should I sample here?
+        action_ind = torch.argmax(q_values).item()
+        action = action_ind
         state, reward, done, _ = env.step(action)
 
         c_steps += 1
@@ -144,6 +148,7 @@ def run_env(env_name, network, verbose=False):
             time.sleep(0.05)
             if c_steps % 5 == 0:
                 c_str = f"Step {c_steps}"
+                c_str += f", action {action}"
                 c_str += f", current reward {reward}"
                 c_str += f", total reward {c_total_reward}"
                 print(c_str)
@@ -155,7 +160,9 @@ if __name__ == "__main__":
     # Classic control environments with discrete action spaces:
     # "Acrobot-v1", "CartPole-v1", "MountainCar-v0"
     ENV_NAME = "Acrobot-v1"
+    # ind_to_action = lambda x: x - 1
     # ENV_NAME = "CartPole-v1"
+    # ind_to_action = None
 
     TrainerClass = DoubleDQN
     # TrainerClass = SimplePolicyGradient
@@ -173,7 +180,7 @@ if __name__ == "__main__":
         eps_dict = {
             "name": "epsilon",
             "init": 0.50,
-            "decay": 0.98,
+            "decay": 0.988,
             "min_value": 0.01,
         }
 
@@ -192,14 +199,24 @@ if __name__ == "__main__":
             "epochs": 800,
             "lr": 1e-3,
             "gamma": 0.99,
+            "loss": nn.SmoothL1Loss()
         }
+
+        eps_dict = {
+            "name": "epsilon",
+            "init": 0.50,
+            "decay": 0.988,
+            "min_value": 0.01,
+        }
+        
         temp_dict = {
             "name": "temperature",
             "init": 5.0,
             "decay": 0.988,
             "min_value": 0.0,
         }
-        decay_parameters = [temp_dict]
+        decay_parameters.append(eps_dict)
+        decay_parameters.append(temp_dict)
 
     if ENV_NAME == "Acrobot-v1":
         pass
@@ -226,3 +243,4 @@ if __name__ == "__main__":
         p_str = f"Finished {trainer_name} - {ENV_NAME} after {n_steps} steps."
         p_str += f"  Total reward {outer_total_reward}"
         print(p_str)
+    print(f"{datetime.datetime.now()} Finished")

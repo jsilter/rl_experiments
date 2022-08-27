@@ -55,12 +55,11 @@ class Trainer(ABC):
         env: "gym.Env",
         network: nn.Module,
         optimizer: Optional[torch.optim.Optimizer],
-        ind_to_action: Callable = None,
+        ind_to_action: Callable = lambda x: x,
         callbacks: Iterable["Callback"] = (),
     ):
         self.env = env
         self.network = network
-        self.target_network = copy.deepcopy(network)
         self.optimizer = optimizer
         self.train_kwargs = {}
         self.ind_to_action = ind_to_action
@@ -76,6 +75,7 @@ class Trainer(ABC):
         self.callbacks.append(callback)
 
     def on_train_start(self):
+        self.network.train(mode=True)
         self.stop_training = False
         for callback in self.callbacks:
             callback.on_train_start()
@@ -130,19 +130,16 @@ class Trainer(ABC):
             state: Observed state.
             epsilon: Chance of picking a random action. Default 0.0 (always greedy)
         Returns:
-            action suitable for env.step.
+            action index.
         """
         if random.random() < epsilon:
-            action = self.env.action_space.sample()
+            action_ind = self.env.action_space.sample()
         else:
             if isinstance(state, np.ndarray):
                 state = torch.from_numpy(state)
             logits = self.network(state)
-            action = np.argmax(logits).item()
-            if self.ind_to_action is not None:
-                action = self.ind_to_action(action)
-
-        return action
+            action_ind = np.argmax(logits).item()
+        return action_ind
 
     def get_policy_discrete(
         self, state: Union[np.ndarray, torch.Tensor], temperature=1.0
@@ -164,8 +161,7 @@ class Trainer(ABC):
             state = torch.from_numpy(state)
         logits = self.network(state)
         temperature = max(1e-8, temperature)
-        logits /= temperature
-        action_dist = Categorical(logits=logits)
+        action_dist = Categorical(logits=logits/temperature)
         return action_dist
 
     def choose_action_sample(
@@ -187,19 +183,16 @@ class Trainer(ABC):
             temperature: Temperature to apply to logits.
                 Default 1.0 (aka leave untouched).
         Returns:
-            action suitable for env.step.
+            action index.
         """
         if random.random() < epsilon:
-            action = self.env.action_space.sample()
+            action_ind = self.env.action_space.sample()
         else:
             if isinstance(state, np.ndarray):
                 state = torch.from_numpy(state)
             action_dist = self.get_policy_discrete(state, temperature=temperature)
-            action = action_dist.sample().item()
-
-        if self.ind_to_action is not None:
-            action = self.ind_to_action(action)
-        return action
+            action_ind = action_dist.sample().item()
+        return action_ind
 
     def choose_action(
         self,
@@ -234,35 +227,36 @@ class DoubleDQN(Trainer):
     actions via epsilon-greedy method.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, loss=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.target_network = copy.deepcopy(self.network)
+        self.loss = loss if loss else nn.MSELoss()
         self.memory = DoubleDQN.ExperienceReplayMemory()
 
     def on_train_start(self):
+        super().on_train_start()
+        self.target_network.train(mode=True)
         self.memory.clear()
-        return super().on_train_start()
 
     def on_epoch_end(self, epoch_num: int, epoch_results: Dict):
         """
         Update the target network every `update_target_interval` epochs.
         """
+        super().on_epoch_end(epoch_num, epoch_results)
 
         # Could/should this be implemented with a callback?
         update_target_interval = self.train_kwargs.get("update_target_interval", 20)
         if epoch_num > 0 and epoch_num % update_target_interval == 0:
             self.target_network.load_state_dict(self.network.state_dict())
 
-        return super().on_epoch_end(epoch_num, epoch_results)
-
     @functools.lru_cache(maxsize=128)
-    def __get_update_funcs(self, batch_size):
-        loss_obj = nn.MSELoss()
+    def __get_batch_inds(self, batch_size):
         batch_inds = np.arange(batch_size)
-        return batch_inds, loss_obj
+        return batch_inds
 
     def _update_network(self, batch_size: int, gamma: float):
         """Perform a single update step on the network"""
-        batch_inds, loss_obj = self.__get_update_funcs(batch_size)
+        batch_inds = self.__get_batch_inds(batch_size)
 
         sample_tuple = self.memory.sample(batch_size)
         b_states, b_actions, b_rewards, b_succs, b_dones = sample_tuple
@@ -281,11 +275,13 @@ class DoubleDQN(Trainer):
         network_outs = self.network(b_states)
         predicted_value = network_outs[batch_inds, b_actions]
 
-        loss_tensor = loss_obj(predicted_value, tot_target_values)
+        loss_tensor = self.loss(predicted_value, tot_target_values)
         current_loss = loss_tensor.item()
 
         self.optimizer.zero_grad()
         loss_tensor.backward()
+        # Apply gradient clipping
+        nn.utils.clip_grad_norm_(self.network.parameters(), 2)
         self.optimizer.step()
 
         return current_loss
@@ -324,9 +320,10 @@ class DoubleDQN(Trainer):
         while not done:
 
             with torch.no_grad():
-                action = self.choose_action(state, epsilon, temperature)
+                action_ind = self.choose_action(state, epsilon, temperature)
 
             # Take step and keep track of reward
+            action = self.ind_to_action(action_ind)
             succ_state, reward, done, _ = self.env.step(action)
             total_reward += reward
             if max_steps is not None:
@@ -334,7 +331,7 @@ class DoubleDQN(Trainer):
                 done &= step_iter < max_steps
 
             # Record transition in memory
-            self.memory.append(state, action, reward, succ_state, done)
+            self.memory.append(state, action_ind, reward, succ_state, done)
             state = succ_state.copy()
             if len(self.memory) < batch_size:
                 continue
