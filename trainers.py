@@ -93,7 +93,18 @@ class Trainer(ABC):
         for callback in self.callbacks:
             callback.on_epoch_end(epoch_num, epoch_results)
 
-    def train(self, epochs: int, **train_kwargs):
+    def train(self, epochs: int, eval_interval: int = None, **train_kwargs):
+        """
+        Execute training loop
+        Args:
+            epochs: Number of epochs to run
+            eval_interval: Frequency to run evaluation, in epochs.
+                Default is None which runs no evaluation.
+            **train_kwargs: Dictionary of keyword arguments passed to trainer.train_epoch
+
+        Returns:
+
+        """
         self.train_kwargs = train_kwargs
         self.on_train_start()
 
@@ -102,6 +113,12 @@ class Trainer(ABC):
             self.on_epoch_start(epoch_num)
 
             epoch_results = self.train_epoch(**self.train_kwargs)
+
+            # Maybe this should be a Callback but this way it's easier
+            # to write the results to Tensorboard if we do it here.
+            if eval_interval is not None and (epoch_num + 1) % eval_interval == 0:
+                eval_results = self.eval_episode()
+                epoch_results.update(eval_results)
 
             self.on_epoch_end(epoch_num, epoch_results)
 
@@ -161,7 +178,7 @@ class Trainer(ABC):
             state = torch.from_numpy(state)
         logits = self.network(state)
         temperature = max(1e-8, temperature)
-        action_dist = Categorical(logits=logits/temperature)
+        action_dist = Categorical(logits=logits / temperature)
         return action_dist
 
     def choose_action_sample(
@@ -206,8 +223,32 @@ class Trainer(ABC):
         else:
             return self.choose_action_sample(state, epsilon, temperature)
 
+    def eval_episode(self) -> Dict:
+        """
+        Execute a single episode for evaluation purposes.
+        Returns:
+            Dictionary of results of episode.
+        """
+
+        state = self.env.reset()
+        done = False
+
+        self.network.eval()
+        steps = total_reward = 0
+        while not done:
+            with torch.no_grad():
+                action = self.choose_action(state, 0.0, 0.0)
+            state, reward, done, _ = self.env.step(action)
+
+            steps += 1
+            total_reward += reward
+
+        self.network.train()
+        results = {"eval_steps": steps, "eval_total_reward": total_reward}
+        return results
+
     @abc.abstractmethod
-    def train_epoch(self, *args, **kwargs):
+    def train_epoch(self, *args, **kwargs) -> Dict:
         """Train for a single epoch.
 
         The definition of 'epoch' may vary by subclass.
@@ -294,7 +335,7 @@ class DoubleDQN(Trainer):
         temperature: float = 0.0,
         max_steps: int = None,
         **kwargs,
-    ):  # pylint: disable=unused-argument
+    ) -> Dict:  # pylint: disable=unused-argument
         """
         Train for an epoch of our environment
         Args:
@@ -506,7 +547,7 @@ class SimplePolicyGradient(Trainer):
         temperature: float = 1.0,
         max_steps_per_episode: int = None,
         **kwargs,
-    ):  # pylint: disable=unused-argument
+    ) -> Dict:  # pylint: disable=unused-argument
         """
         Train for an epoch.
 
