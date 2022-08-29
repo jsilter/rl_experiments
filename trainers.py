@@ -133,7 +133,7 @@ class Trainer(ABC):
         self,
         state: Union[np.ndarray, torch.Tensor],
         epsilon: float = 0.0,
-    ) -> int:
+    ) -> Tuple[int, float]:
         """
         Choose action greedily based on the state.
 
@@ -148,18 +148,21 @@ class Trainer(ABC):
             epsilon: Chance of picking a random action. Default 0.0 (always greedy)
         Returns:
             action index.
+            logit of action
         """
+
+        if isinstance(state, np.ndarray):
+            state = torch.from_numpy(state)
+        logits = self.network(state)
         if random.random() < epsilon:
             action_ind = self.env.action_space.sample()
         else:
-            if isinstance(state, np.ndarray):
-                state = torch.from_numpy(state)
-            logits = self.network(state)
             action_ind = np.argmax(logits).item()
-        return action_ind
+        logit = logits[action_ind].item()
+        return action_ind, logit
 
     def get_policy_discrete(
-        self, state: Union[np.ndarray, torch.Tensor], temperature=1.0
+        self, state: Union[np.ndarray, torch.Tensor], temperature=1.0, logits=None
     ) -> torch.distributions.Distribution:
         """
         Get the policy for this network
@@ -170,20 +173,23 @@ class Trainer(ABC):
         Args:
             state: Observed environment state
             temperature: Temperature to use to modify logits.
+            logits: If we already have the logits calculated, can use them here.
+                Note that temperature will be applied to these values.
 
         Returns:
             A distribution over choices.
         """
         if isinstance(state, np.ndarray):
             state = torch.from_numpy(state)
-        logits = self.network(state)
+        if logits is None:
+            logits = self.network(state)
         temperature = max(1e-8, temperature)
         action_dist = Categorical(logits=logits / temperature)
         return action_dist
 
     def choose_action_sample(
         self, state: np.ndarray, epsilon: float = 0.0, temperature=1.0
-    ) -> int:
+    ) -> Tuple[int, float]:
         """
         Choose action based on the state.
 
@@ -200,23 +206,30 @@ class Trainer(ABC):
             temperature: Temperature to apply to logits.
                 Default 1.0 (aka leave untouched).
         Returns:
-            action index.
+            action index
+            logit of action
         """
+
+        if isinstance(state, np.ndarray):
+            state = torch.from_numpy(state)
+
+        logits = self.network(state)
         if random.random() < epsilon:
             action_ind = self.env.action_space.sample()
         else:
-            if isinstance(state, np.ndarray):
-                state = torch.from_numpy(state)
-            action_dist = self.get_policy_discrete(state, temperature=temperature)
+            action_dist = self.get_policy_discrete(
+                state, temperature=temperature, logits=logits
+            )
             action_ind = action_dist.sample().item()
-        return action_ind
+        logit = logits[action_ind].item()
+        return action_ind, logit
 
     def choose_action(
         self,
         state: Union[np.ndarray, torch.Tensor],
         epsilon: float = 0.0,
         temperature: float = 0.0,
-    ) -> int:
+    ) -> Tuple[int, float]:
         """Choose action based on state. Default implementation is epsilon-greedy."""
         if temperature == 0:
             return self.choose_action_greedy(state, epsilon)
@@ -234,10 +247,12 @@ class Trainer(ABC):
         done = False
 
         self.network.eval()
+        # Do I want to use the training parameters for eval?
+        epsilon = temperature = 0.0
         steps = total_reward = 0
         while not done:
             with torch.no_grad():
-                action = self.choose_action(state, 0.0, 0.0)
+                action, logit = self.choose_action(state, epsilon, temperature)
             state, reward, done, _ = self.env.step(action)
 
             steps += 1
@@ -355,18 +370,28 @@ class DoubleDQN(Trainer):
 
         state = self.env.reset()
         done = False
-        epoch_results = {"steps": 0, "total_reward": 0.0, "mean_loss": 0.0}
+        epoch_results = {
+            "steps": 0,
+            "total_reward": 0.0,
+            "mean_loss": 0.0,
+            "mean_logit": 0.0,
+        }
         step_iter = 0
         total_reward = total_loss = 0.0
+        mean_logit = 0.0
         while not done:
 
             with torch.no_grad():
-                action_ind = self.choose_action(state, epsilon, temperature)
+                action_ind, logit = self.choose_action(state, epsilon, temperature)
+
+            # For debugging purposes, keep track of the network outputs.
+            mean_logit += logit
 
             # Take step and keep track of reward
             action = self.ind_to_action(action_ind)
             succ_state, reward, done, _ = self.env.step(action)
             total_reward += reward
+
             if max_steps is not None:
                 # Treat hitting the maximum as a regular end of episode
                 done &= step_iter < max_steps
@@ -388,6 +413,7 @@ class DoubleDQN(Trainer):
         epoch_results["total_reward"] = total_reward
         if step_iter > 0:
             epoch_results["mean_loss"] = total_loss / step_iter
+            epoch_results["mean_logit"] = mean_logit / step_iter
 
         return epoch_results
 
@@ -571,11 +597,12 @@ class SimplePolicyGradient(Trainer):
         memory = SimplePolicyGradient.EpisodicMemory()
 
         epoch_results = {"steps": 0, "total_reward": 0.0, "mean_loss": 0.0}
-        epoch_results.update({"mean_reward": 0.0, "num_episodes": 0})
+        epoch_results.update({"mean_reward": 0.0, "num_episodes": 0, "mean_logit": 0.0})
         total_steps = 0
         total_reward = 0
         total_loss = 0
         num_episodes = 0
+        mean_logit = 0.0
 
         # We loop through many episodes until our memory buffer is full,
         # and define those N-episodes as an epoch.
@@ -590,7 +617,9 @@ class SimplePolicyGradient(Trainer):
             while not episode_done:
                 # Choose action
                 with torch.no_grad():
-                    action = self.choose_action(state, epsilon, temperature)
+                    action, logit = self.choose_action(state, epsilon, temperature)
+
+                mean_logit += logit
 
                 # Take step
                 succ_state, reward, episode_done, _ = self.env.step(action)
@@ -624,6 +653,7 @@ class SimplePolicyGradient(Trainer):
         epoch_results["mean_reward"] = total_reward / num_episodes
         if total_steps > 0:
             epoch_results["mean_loss"] = total_loss / total_steps
+            epoch_results["mean_logit"] = mean_logit / total_steps
 
         return epoch_results
 
