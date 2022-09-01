@@ -55,12 +55,14 @@ class Trainer(ABC):
         env: "gym.Env",
         network: nn.Module,
         optimizer: Optional[torch.optim.Optimizer],
+        loss: Optional[torch.nn.Module],
         ind_to_action: Callable = lambda x: x,
         callbacks: Iterable["Callback"] = (),
     ):
         self.env = env
         self.network = network
         self.optimizer = optimizer
+        self.loss = loss
         self.train_kwargs = {}
         self.ind_to_action = ind_to_action
         self.callbacks = []
@@ -283,10 +285,10 @@ class DoubleDQN(Trainer):
     actions via epsilon-greedy method.
     """
 
-    def __init__(self, *args, loss=None, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.target_network = copy.deepcopy(self.network)
-        self.loss = loss if loss else nn.MSELoss()
+        self.loss = self.loss if self.loss else nn.MSELoss()
         self.memory = DoubleDQN.ExperienceReplayMemory()
 
     def on_train_start(self):
@@ -562,6 +564,8 @@ class SimplePolicyGradient(Trainer):
 
         self.optimizer.zero_grad()
         loss_tensor.backward()
+        # Apply gradient clipping
+        nn.utils.clip_grad_norm_(self.network.parameters(), 2)
         self.optimizer.step()
 
         return loss_value

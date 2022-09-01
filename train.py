@@ -43,7 +43,6 @@ def build_network(
         output_size: Size of output
         hidden_layers: Iterable of dimensions of hidden layers.
             Must be at least length 1.
-        hdim: Dimension of hidden layers.
         activation: Activation function. Must be a callable, such as nn.ReLU.
             Used after all layers except the output.
 
@@ -144,7 +143,7 @@ def run_env(env_name, network, verbose=False):
         env.render()
 
     steps = total_reward = 0
-    temperature = 0.0
+    temperature = 1.0
     # Pretty strong decay, really just want to sample in the beginning
     temp_decay = 0.96
     while not done:
@@ -186,11 +185,11 @@ if __name__ == "__main__":
     # ENV_NAME = "CartPole-v1"
     # ind_to_action = None
 
-    TrainerClass = DoubleDQN
-    # TrainerClass = SimplePolicyGradient
+    # TrainerClass = DoubleDQN
+    TrainerClass = SimplePolicyGradient
     trainer_name = TrainerClass.__name__
 
-    tag = "50temp"
+    tag = "init"
     # tag = "debug"
 
     train_kwargs, decay_parameters = get_parameters(trainer_name, ENV_NAME)
