@@ -6,14 +6,16 @@ Intended to demonstrate usage of `trainers` and `callbacks`.
 import datetime
 import os
 import time
-from typing import Type, Iterable
+from typing import Iterable, Type
 
 import gym
+import numpy as np
 import torch
 from ray import tune
 from torch import nn
 
 from callbacks import DecayParameter, TensorboardCallback
+from parameters import get_parameters
 from trainers import DoubleDQN, SimplePolicyGradient
 
 DEVICE = "cpu"
@@ -138,6 +140,7 @@ def run_env(env_name, network, verbose=False):
     done = False
 
     if verbose:
+        np.set_printoptions(precision=4)
         env.render()
 
     steps = total_reward = 0
@@ -146,7 +149,6 @@ def run_env(env_name, network, verbose=False):
     temp_decay = 0.96
     while not done:
         q_values = network(torch.tensor(state))
-        print(f"Step {steps}, q_value {q_values}")
         if temperature == 0:
             action = torch.argmax(q_values).item()
         else:
@@ -166,6 +168,7 @@ def run_env(env_name, network, verbose=False):
             time.sleep(0.05)
             if steps % 5 == 0:
                 c_str = f"Step {steps}"
+                c_str += f", q_value {q_values.detach().numpy()}"
                 c_str += f", action {action}"
                 c_str += f", current reward {reward}"
                 c_str += f", total reward {total_reward}"
@@ -175,6 +178,7 @@ def run_env(env_name, network, verbose=False):
 
 
 if __name__ == "__main__":
+
     # Classic control environments with discrete action spaces:
     # "Acrobot-v1", "CartPole-v1", "MountainCar-v0"
     ENV_NAME = "Acrobot-v1"
@@ -189,63 +193,10 @@ if __name__ == "__main__":
     tag = "50temp"
     # tag = "debug"
 
-    decay_parameters = []
-
-    if trainer_name == "SimplePolicyGradient":
-
-        train_kwargs = {
-            "epochs": 4000,
-            "lr": 1e-4,
-        }
-
-        eps_dict = {
-            "name": "epsilon",
-            "init": 0.50,
-            "decay": 0.988,
-            "min_value": 0.01,
-        }
-
-        temp_dict = {
-            "name": "temperature",
-            "init": 5.0,
-            "decay": 0.988,
-            "min_value": 1.0,
-        }
-
-        decay_parameters.append(temp_dict)
-        # decay_parameters.append(eps_dict)
-
-    elif trainer_name == "DoubleDQN":
-        train_kwargs = {
-            "epochs": 1000,
-            "lr": 1e-4,
-            "gamma": 0.99,
-            "loss": nn.SmoothL1Loss(),
-        }
-
-        eps_dict = {
-            "name": "epsilon",
-            "init": 0.00,
-            "decay": 0.988,
-            "min_value": 0.00,
-        }
-
-        temp_dict = {
-            "name": "temperature",
-            "init": 50.0,
-            "decay": 0.988,
-            "min_value": 0.0,
-        }
-        decay_parameters.append(eps_dict)
-        decay_parameters.append(temp_dict)
-
-    if ENV_NAME == "Acrobot-v1":
-        pass
-    elif ENV_NAME == "MountainCar-v0":
-        pass
+    train_kwargs, decay_parameters = get_parameters(trainer_name, ENV_NAME)
 
     exp_name = f"{trainer_name}_{ENV_NAME}_{tag}"
-    network_path = f"{exp_name}.pt"
+    network_path = f"models/{exp_name}.pt"
     log_dir = os.path.join("logs", exp_name)
     DO_TRAIN = False or not os.path.exists(network_path)
     DO_RUN = True
