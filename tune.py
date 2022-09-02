@@ -1,8 +1,12 @@
 __doc__ = """ Hyper-parameter tuning"""
 
+import os
+
+import pandas as pd
 import torch
 from ray import tune
 
+from parameters import get_parameters
 from train import run_env, train_example
 from trainers import DoubleDQN, SimplePolicyGradient
 
@@ -10,48 +14,37 @@ if __name__ == "__main__":
     # Use Ray  for hyperparameter tuning
     # https://docs.ray.io/en/latest/index.html
     # https://docs.ray.io/en/latest/tune/api_docs/search_space.html
-    TrainerClass = DoubleDQN
-    epochs = 800
-    # TrainerClass = SimplePolicyGradient
-    # epochs = 4000
+    # TrainerClass = DoubleDQN
+    # epochs = 800
+    TrainerClass = SimplePolicyGradient
+    epochs = None
 
     search_space = {
-        # "lr": tune.grid_search([1e-5, 1e-4, 1e-3, 1e-2]),
-        "epsilon": tune.grid_search([0.0, 0.1, 0.2, 0.3, 0.4, 0.5]),
+        "lr": tune.grid_search([1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2]),
+        # "epsilon": tune.grid_search([0.0, 0.1, 0.2, 0.3, 0.4, 0.5]),
     }
-    tag = "eps_ep800"
+    tag = "lr_ep4k"
 
     trainer_name = TrainerClass.__name__
     ENV_NAME = "Acrobot-v1"
     exp_name = f"{trainer_name}_{ENV_NAME}_{tag}"
+    output_dir = "tuning_results"
+    output_stub = f"{output_dir}/{exp_name}"
+    os.makedirs(output_dir, exist_ok=True)
     local_checkpoint_dir = "checkpoints"
-    num_samples = 3
-
-    # These get over-written by new parameters from the search space, if applicable
-    train_kwargs = {
-        "epochs": epochs,
-        "lr": 1e-4,
-        "gamma": 0.99,
-        "loss": torch.nn.SmoothL1Loss(),
-    }
-
-    # These may get overwritten
-    eps_dict = {"name": "epsilon", "init": 0.00, "decay": 0.988, "min_value": 0.00}
+    num_samples = 5
 
     def objective(config, checkpoint_dir=None):
+        train_kwargs, decay_parameters = get_parameters(trainer_name, ENV_NAME)
         cur_train_kwargs = train_kwargs.copy()
         cur_train_kwargs.update(config)
+        if epochs:
+            cur_train_kwargs.update({"epochs": epochs})
 
-        temp_dict = {
-            "name": "temperature",
-            "init": 5.0,
-            "decay": 0.988,
-            "min_value": 0.0,
-        }
-        cur_eps_dict = eps_dict.copy()
-        cur_eps_dict["init"] = config["epsilon"]
-
-        decay_parameters = [cur_eps_dict, temp_dict]
+        for decay_parm in decay_parameters:
+            cur_name = decay_parm["name"]
+            if cur_name in config:
+                decay_parm["init"] = config[cur_name]
 
         # Note: I could save tensorboard logs with:
         # log_dir = os.path.join(checkpoint_dir, "logs")
@@ -80,6 +73,17 @@ if __name__ == "__main__":
     )
 
     print("Best config is:", analysis.best_config)
-    output_path = f"{exp_name}_tuning_results.tsv"
+    output_path = f"{output_stub}_tuning_results.tsv"
     print(f"Saving results to {output_path}")
     analysis.results_df.to_csv(output_path, sep="\t")
+
+    group_cols = [f"config.{x}" for x in sorted(search_space.keys())]
+    results_df = analysis.results_df
+    mean_performance = results_df.groupby(group_cols)["reward"].mean()
+    std_performance = results_df.groupby(group_cols)["reward"].std()
+    counts = results_df.groupby(group_cols)["reward"].count()
+
+    collated_df = pd.concat([mean_performance, std_performance, counts], axis=1)
+    collated_df.columns = ["mean", "std", "count"]
+    collated_df.sort_values("mean", ascending=False, inplace=True)
+    collated_df.to_csv(f"{output_stub}_collated_results.tsv")
