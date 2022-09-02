@@ -189,7 +189,7 @@ if __name__ == "__main__":
     TrainerClass = SimplePolicyGradient
     trainer_name = TrainerClass.__name__
 
-    tag = "init"
+    tag = "rtg"
     # tag = "debug"
 
     train_kwargs, decay_parameters = get_parameters(trainer_name, ENV_NAME)

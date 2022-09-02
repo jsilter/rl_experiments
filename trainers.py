@@ -601,7 +601,8 @@ class SimplePolicyGradient(Trainer):
             though they will not be used.
         """
 
-        memory = SimplePolicyGradient.EpisodicMemory()
+        use_reward_to_go = kwargs.get("use_reword_to_go", True)
+        memory = SimplePolicyGradient.EpisodicMemory(use_reward_to_go)
 
         epoch_results = {"steps": 0, "total_reward": 0.0, "mean_loss": 0.0}
         epoch_results.update({"mean_reward": 0.0, "num_episodes": 0, "mean_logit": 0.0})
@@ -621,6 +622,7 @@ class SimplePolicyGradient(Trainer):
             step_iter = 0
             states = []
             actions = []
+            rewards = []
             while not episode_done:
                 # Choose action
                 with torch.no_grad():
@@ -634,6 +636,7 @@ class SimplePolicyGradient(Trainer):
 
                 states.append(state)
                 actions.append(action)
+                rewards.append(reward)
                 step_iter += 1
 
                 state = succ_state.copy()
@@ -642,7 +645,7 @@ class SimplePolicyGradient(Trainer):
                     # Treat hitting the maximum as a regular end of episode
                     episode_done &= step_iter < max_steps_per_episode
 
-            memory.add_episode(states, actions, episode_reward)
+            memory.add_episode(states, actions, rewards)
             total_steps += step_iter
             total_reward += episode_reward
             num_episodes += 1
@@ -669,11 +672,16 @@ class SimplePolicyGradient(Trainer):
         Class used for storing results episode-by-episode
         """
 
-        def __init__(self, float_type: torch.dtype = torch.float64):
+        def __init__(
+            self, use_reward_to_go=False, float_type: torch.dtype = torch.float64
+        ):
             """
             Args:
+                use_reward_to_go: Whether to use reward_to_go.
+                https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#implementing-reward-to-go-policy-gradient
                 float_type: torch.dtype to using for floating points
             """
+            self.use_reward_to_go = use_reward_to_go
             self.float_type = float_type
             self.states = []
             self.actions = []
@@ -688,18 +696,30 @@ class SimplePolicyGradient(Trainer):
             self.actions = []
             self.weights = []
 
+        @staticmethod
+        def reward_to_go_weights(rewards):
+            # Calculate reward-to-go rewards
+            nr = len(rewards)
+            rtg_weights = [0] * nr
+            # rtg_weights[ii] can be calculated recursively if we work backwards
+            for ii in reversed(range(nr)):
+                rtg_weights[ii] = rewards[ii] + (
+                    rtg_weights[ii + 1] if ii + 1 < nr else 0
+                )
+            return rtg_weights
+
         def add_episode(
             self,
             states: List[np.ndarray],
             actions: List[int],
-            episode_reward: float,
+            rewards: List[float],
         ) -> int:
             """
             Add results from a single episode to memory
             Args:
                 states: Sequence of observed states of the environment.
                 actions: Sequence of actions we took in the provided states.
-                episode_reward: Total reward over the episode.
+                rewards: Sequence of rewards we received.
 
             Note:
                 len(states) must equal len(actions).
@@ -713,7 +733,12 @@ class SimplePolicyGradient(Trainer):
                 raise ValueError(err_str)
 
             num_to_add = len(states)
-            new_weights = [episode_reward] * num_to_add
+
+            if self.use_reward_to_go:
+                new_weights = self.reward_to_go_weights(rewards)
+            else:
+                total_reward = sum(rewards)
+                new_weights = [total_reward] * num_to_add
 
             self.states += states
             self.actions += actions
