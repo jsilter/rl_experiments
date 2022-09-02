@@ -102,7 +102,8 @@ class Trainer(ABC):
             epochs: Number of epochs to run
             eval_interval: Frequency to run evaluation, in epochs.
                 Default is None which runs no evaluation.
-            **train_kwargs: Dictionary of keyword arguments passed to trainer.train_epoch
+            **train_kwargs:
+                Remaining keyword arguments passed to self.train_epoch
 
         Returns:
 
@@ -254,7 +255,7 @@ class Trainer(ABC):
         steps = total_reward = 0
         while not done:
             with torch.no_grad():
-                action, logit = self.choose_action(state, epsilon, temperature)
+                action, _ = self.choose_action(state, epsilon, temperature)
             state, reward, done, _ = self.env.step(action)
 
             steps += 1
@@ -588,9 +589,11 @@ class SimplePolicyGradient(Trainer):
         Args:
             batch_size: Batch size used for episodic memory.
             epsilon: epsilon used in epsilon-random.
-                Default is 0, which samples by treating the network outputs as logits
+                Default is 0, which samples by treating the network
+                outputs as logits.
             temperature: Temperature used in sampling.
-                Default is 1, which treats the network outputs as logits without modification.
+                Default is 1, which treats the network outputs as logits
+                without modification.
             max_steps_per_episode: Maximum steps per episode.
                 (episode, not epoch).
                 Default is None, we continue training until the memory is full.
