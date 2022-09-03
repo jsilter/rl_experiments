@@ -132,7 +132,7 @@ def train_example(
     return network
 
 
-def run_env(env_name, network, verbose=False):
+def run_env(env_name, network, temperature=0.0, verbose=False):
     """Run the network in the environment once"""
     env = gym.make(env_name)
     state = env.reset()
@@ -143,9 +143,7 @@ def run_env(env_name, network, verbose=False):
         env.render()
 
     steps = total_reward = 0
-    temperature = 1.0
-    # Pretty strong decay, really just want to sample in the beginning
-    temp_decay = 0.96
+    temp_decay = 1.0
     while not done:
         q_values = network(torch.tensor(state))
         if temperature == 0:
@@ -214,7 +212,9 @@ if __name__ == "__main__":
     if DO_RUN:
         print(f"Loading network from {network_path}")
         main_network = torch.load(network_path)
-        n_steps, outer_total_reward = run_env(ENV_NAME, main_network, verbose=True)
+        n_steps, outer_total_reward = run_env(ENV_NAME, main_network,
+                                              temperature=train_kwargs.get("temperature", 0),
+                                              verbose=True)
         p_str = f"Finished {exp_name} after {n_steps} steps."
         p_str += f"  Total reward {outer_total_reward}"
         print(p_str)
