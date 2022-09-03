@@ -67,7 +67,7 @@ def get_parameters(trainer_name, env_name) -> Tuple[Dict, List]:
         }
         decay_parameters = [eps_dict, temp_dict]
     elif param_key == ("SimplePolicyGradient", "Acrobot-v1"):
-        train_kwargs = {"epochs": 4000, "lr": 1e-4, "temperature": 1.0}
+        train_kwargs = {"epochs": 4000, "lr": 8e-5, "temperature": 1.0}
         eps_dict = {
             "name": "epsilon",
             "init": 0.50,

@@ -20,7 +20,7 @@ if __name__ == "__main__":
     epochs = None
 
     search_space = {
-        "lr": tune.grid_search([1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2]),
+        "lr": tune.grid_search([1e-5, 5e-5, 8e-5, 1e-4, 3e-4, 5e-4, 1e-3, 5e-3]),
         # "epsilon": tune.grid_search([0.0, 0.1, 0.2, 0.3, 0.4, 0.5]),
     }
     tag = "lr_ep4k"
@@ -86,4 +86,4 @@ if __name__ == "__main__":
     collated_df = pd.concat([mean_performance, std_performance, counts], axis=1)
     collated_df.columns = ["mean", "std", "count"]
     collated_df.sort_values("mean", ascending=False, inplace=True)
-    collated_df.to_csv(f"{output_stub}_collated_results.tsv")
+    collated_df.to_csv(f"{output_stub}_collated_results.tsv", sep="\t")
