@@ -601,7 +601,7 @@ class SimplePolicyGradient(Trainer):
             though they will not be used.
         """
 
-        use_reward_to_go = kwargs.get("use_reword_to_go", True)
+        use_reward_to_go = kwargs.get("use_reward_to_go", True)
         memory = SimplePolicyGradient.EpisodicMemory(use_reward_to_go)
 
         epoch_results = {"steps": 0, "total_reward": 0.0, "mean_loss": 0.0}
