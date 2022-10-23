@@ -178,7 +178,7 @@ if __name__ == "__main__":
 
     # Classic control environments with discrete action spaces:
     # "Acrobot-v1", "CartPole-v1", "MountainCar-v0"
-    ENV_NAME = "Acrobot-v1"
+    ENV_NAME = "MountainCar-v0"
     # ind_to_action = lambda x: x - 1
     # ENV_NAME = "CartPole-v1"
     # ind_to_action = None
@@ -187,8 +187,8 @@ if __name__ == "__main__":
     TrainerClass = SimplePolicyGradient
     trainer_name = TrainerClass.__name__
 
-    tag = "rtg"
-    # tag = "debug"
+    # tag = "rtg"
+    tag = "debug"
 
     train_kwargs, decay_parameters = get_parameters(trainer_name, ENV_NAME)
 
