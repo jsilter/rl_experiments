@@ -212,9 +212,12 @@ if __name__ == "__main__":
     if DO_RUN:
         print(f"Loading network from {network_path}")
         main_network = torch.load(network_path)
-        n_steps, outer_total_reward = run_env(ENV_NAME, main_network,
-                                              temperature=train_kwargs.get("temperature", 0),
-                                              verbose=True)
+        n_steps, outer_total_reward = run_env(
+            ENV_NAME,
+            main_network,
+            temperature=train_kwargs.get("temperature", 0),
+            verbose=True,
+        )
         p_str = f"Finished {exp_name} after {n_steps} steps."
         p_str += f"  Total reward {outer_total_reward}"
         print(p_str)

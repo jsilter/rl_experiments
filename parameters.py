@@ -67,9 +67,7 @@ def get_parameters(trainer_name, env_name) -> Tuple[Dict, List]:
         }
         decay_parameters = [eps_dict, temp_dict]
     elif param_key == ("SimplePolicyGradient", "Acrobot-v1"):
-        train_kwargs = {"epochs": 4000,
-                        "lr": 8e-5,
-                        "temperature": 1.0}
+        train_kwargs = {"epochs": 4000, "lr": 8e-5, "temperature": 1.0}
         eps_dict = {
             "name": "epsilon",
             "init": 0.50,
@@ -80,13 +78,13 @@ def get_parameters(trainer_name, env_name) -> Tuple[Dict, List]:
     elif param_key == ("DoubleDQN", "MountainCar-v0"):
         train_kwargs = {
             "epochs": 1000,
-            "lr": 1e-4,
+            "lr": 5e-4,
             "gamma": 0.99,
             "loss": nn.SmoothL1Loss(),
         }
         eps_dict = {
             "name": "epsilon",
-            "init": 0.00,
+            "init": 0.1,
             "decay": 0.988,
             "min_value": 0.00,
         }
@@ -98,10 +96,7 @@ def get_parameters(trainer_name, env_name) -> Tuple[Dict, List]:
         }
         decay_parameters = [eps_dict, temp_dict]
     elif param_key == ("SimplePolicyGradient", "MountainCar-v0"):
-        train_kwargs = {
-            "epochs": 4000,
-            "lr": 1e-4
-        }
+        train_kwargs = {"epochs": 4000, "lr": 1e-4}
         eps_dict = {
             "name": "epsilon",
             "init": 0.00,
