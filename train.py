@@ -43,15 +43,11 @@ def build_network(
         (input, hidden_0, hidden_1, output) with ReLU6 activations.
 
     Args:
-        input_size:
-            Size of input
-        output_size:
-            Size of output
-        hidden_layers:
-            Sequence of dimensions of hidden layers.
+        input_size: Size of input
+        output_size: Size of output
+        hidden_layers: Sequence of dimensions of hidden layers.
             Must be at least length 1.
-        activation:
-            Activation function. Must be a callable, such as nn.ReLU.
+        activation: Activation function.
             Used after all layers except the output.
 
     Returns:
@@ -89,19 +85,14 @@ def train_example(
     """
     Example of training a network using these classes. We use the OpenAI gym.
     Args:
-        trainer_class:
-            name of "trainers.Trainer" class to use
-        env_name:
-            Name of OpenAI gym environment to use.
-        train_kwargs:
-            Dict of arguments passed to trainer.train
-        decay_parameters:
-            List of Dict of parameters to decay. The Dict specifies initial/min/decay rate
-        log_dir:
-            Directory to store tensorboard logs
-        checkpoint_dir:
-            Directory to store training checkpoints
-        eval_interval:
+        trainer_class: name of "trainers.Trainer" class to use
+        env_name: Name of OpenAI gym environment to use.
+        train_kwargs: Dict of arguments passed to trainer.train
+        decay_parameters: Sequence of Dict of parameters to decay.
+            The Dict specifies initial/min/decay rate
+        log_dir: Directory to store tensorboard logs
+        checkpoint_dir: Directory to store training checkpoints
+        eval_interval: Frequence to run evaluation, in epochs.
 
     Returns:
         Trained neural network model
@@ -200,11 +191,9 @@ def main_train(env_name: str, tag: str):
     """
     Run training
     Args:
-        env_name:
-            Name of environment.
+        env_name: Name of environment.
             Valid choices: "Acrobot-v1", "CartPole-v1", "MountainCar-v0"
-        tag:
-            label for output checkpoint
+        tag: label for output checkpoint
     Returns:
         None
     """
