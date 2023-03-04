@@ -6,12 +6,12 @@ from typing import Dict, List, Tuple
 from torch import nn
 
 
-def get_parameters(trainer_name, env_name) -> Tuple[Dict, List]:
+def get_parameters(trainer_name: str, env_name: str) -> Tuple[Dict, List]:
     """
     Retrieve appropriate hyper-parameters for the given trainer and task.
     Args:
-        trainer_name:
-        env_name:
+        trainer_name: Name of trainer to use (e.g. DoubleDQN)
+        env_name: Name of environment in which to train (e.g. CartPole-v1)
 
     Returns:
         train_kwargs : training keyword arguments
@@ -96,11 +96,11 @@ def get_parameters(trainer_name, env_name) -> Tuple[Dict, List]:
         }
         decay_parameters = [eps_dict, temp_dict]
     elif param_key == ("SimplePolicyGradient", "MountainCar-v0"):
-        train_kwargs = {"epochs": 4000, "lr": 1e-4}
+        train_kwargs = {"epochs": 4000, "lr": 5e-5}
         eps_dict = {
             "name": "epsilon",
-            "init": 0.00,
-            "decay": 0.988,
+            "init": 0.1,
+            "decay": 0.99,
             "min_value": 0.00,
         }
         temp_dict = {

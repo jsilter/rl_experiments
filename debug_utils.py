@@ -5,12 +5,14 @@ import torch
 
 def network_msdiff(net1: torch.nn.Module, net2: torch.nn.Module) -> float:
     """
-    Calculate the mean squared difference between two networks
+    Calculate the mean squared difference between two networks.
+    Networks must be the same structure, we look at the MSE between the weights.
     Args:
         net1:
         net2:
 
     Returns:
+        mean squared difference
 
     """
 

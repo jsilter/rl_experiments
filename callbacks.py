@@ -13,12 +13,12 @@ class Callback(ABC):
     """
     Base class used for other callbacks.
     Default implementation has no-ops for all methods.
-    None of the methods strictly required being over-ridden,
+    Subclasses are not required to override any given method,
     because any given subclass is likely to only override a subset
     and different subclasses may override different subsets.
 
     Attributes:
-        trainer (`trainers.Trainer`): Trainer to which this callback is attached.
+        trainer ("trainers.Trainer"): Trainer to which this callback is attached.
 
     """
 
@@ -32,9 +32,11 @@ class Callback(ABC):
 
     def on_train_start(self):
         """Called before main training loop starts"""
+        pass
 
     def on_train_end(self):
         """Called after main training loop is finished"""
+        pass
 
     def on_epoch_start(self, epoch_num: int):
         """
@@ -42,6 +44,7 @@ class Callback(ABC):
         Args:
             epoch_num: Training epoch index
         """
+        pass
 
     def on_epoch_end(self, epoch_num: int, epoch_results: Dict):
         """
@@ -50,6 +53,7 @@ class Callback(ABC):
             epoch_num: Training epoch index
             epoch_results: Dict of results from the epoch
         """
+        pass
 
 
 class DecayParameter(Callback):
@@ -83,7 +87,7 @@ class DecayParameter(Callback):
         """Initializes parameter value"""
         self.trainer.train_kwargs[self.name] = self.init
 
-    def on_epoch_end(self, epoch_num, epoch_results):
+    def on_epoch_end(self, epoch_num: int, epoch_results: Dict):
         """Updates parameter value"""
         old_value = self.trainer.train_kwargs.get(self.name, 0.0)
         new_value = self.decay * old_value
@@ -122,7 +126,7 @@ class TensorboardCallback(Callback):
     Callback which logs training results to Tensorboard
     """
 
-    def __init__(self, log_dir, **kwargs):
+    def __init__(self, log_dir: str, **kwargs):
         """
         Args:
             log_dir: Directory for storing log files

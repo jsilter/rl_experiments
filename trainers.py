@@ -17,6 +17,8 @@ from torch import nn
 from torch.distributions import Categorical
 from tqdm import tqdm
 
+from utils import Number
+
 
 class Trainer(ABC):
     """
@@ -112,7 +114,6 @@ class Trainer(ABC):
         self.on_train_start()
 
         for epoch_num in tqdm(range(epochs)):
-
             self.on_epoch_start(epoch_num)
 
             epoch_results = self.train_epoch(**self.train_kwargs)
@@ -313,7 +314,7 @@ class DoubleDQN(Trainer):
         batch_inds = np.arange(batch_size)
         return batch_inds
 
-    def _update_network(self, batch_size: int, gamma: float):
+    def _update_network(self, batch_size: int, gamma: float) -> float:
         """Perform a single update step on the network"""
         batch_inds = self.__get_batch_inds(batch_size)
 
@@ -383,7 +384,6 @@ class DoubleDQN(Trainer):
         total_reward = total_loss = 0.0
         mean_logit = 0.0
         while not done:
-
             with torch.no_grad():
                 action_ind, logit = self.choose_action(state, epsilon, temperature)
 
@@ -546,13 +546,22 @@ class SimplePolicyGradient(Trainer):
 
     def _update_network(
         self, memory: "SimplePolicyGradient.EpisodicMemory", temperature: float
-    ):
-        """Perform an update step
+    ) -> float:
+        """
+        Perform an update step.
 
         Retrieve transitions from memory,
         calculate log-loss,
         calculate gradients,
         take optimizer step.
+
+        Args:
+            memory:
+                Memory which stores previous events
+            temperature:
+                policy sampling temperature
+        Returns:
+            loss value
         """
 
         sample_tuple = memory.get_all()
@@ -578,7 +587,7 @@ class SimplePolicyGradient(Trainer):
         temperature: float = 1.0,
         max_steps_per_episode: int = None,
         **kwargs,
-    ) -> Dict:  # pylint: disable=unused-argument
+    ) -> Dict:
         """
         Train for an epoch.
 
@@ -587,14 +596,18 @@ class SimplePolicyGradient(Trainer):
         then do an update step.
 
         Args:
-            batch_size: Batch size used for episodic memory.
-            epsilon: epsilon used in epsilon-random.
+            batch_size:
+                Batch size used for episodic memory.
+            epsilon:
+                epsilon used in epsilon-random.
                 Default is 0, which samples by treating the network
                 outputs as logits.
-            temperature: Temperature used in sampling.
+            temperature:
+                Temperature used in sampling.
                 Default is 1, which treats the network outputs as logits
                 without modification.
-            max_steps_per_episode: Maximum steps per episode.
+            max_steps_per_episode:
+                Maximum steps per episode.
                 (episode, not epoch).
                 Default is None, we continue training until the memory is full.
             **kwargs: Other keyword arguments can be accepted without errors,
@@ -673,11 +686,14 @@ class SimplePolicyGradient(Trainer):
         """
 
         def __init__(
-            self, use_reward_to_go=False, float_type: torch.dtype = torch.float64
+            self,
+            use_reward_to_go: bool = False,
+            float_type: torch.dtype = torch.float64,
         ):
             """
             Args:
-                use_reward_to_go: Whether to use reward_to_go.
+                use_reward_to_go:
+                Whether to use reward_to_go.
                 https://spinningup.openai.com/en/latest/spinningup/rl_intro3.html#implementing-reward-to-go-policy-gradient
                 float_type: torch.dtype to using for floating points
             """
@@ -697,7 +713,7 @@ class SimplePolicyGradient(Trainer):
             self.weights = []
 
         @staticmethod
-        def reward_to_go_weights(rewards):
+        def reward_to_go_weights(rewards: Sequence[Number]) -> Sequence[Number]:
             # Calculate reward-to-go rewards
             nr = len(rewards)
             rtg_weights = [0] * nr
@@ -710,16 +726,19 @@ class SimplePolicyGradient(Trainer):
 
         def add_episode(
             self,
-            states: List[np.ndarray],
-            actions: List[int],
-            rewards: List[float],
+            states: Sequence[np.ndarray],
+            actions: Sequence[int],
+            rewards: Sequence[float],
         ) -> int:
             """
             Add results from a single episode to memory
             Args:
-                states: Sequence of observed states of the environment.
-                actions: Sequence of actions we took in the provided states.
-                rewards: Sequence of rewards we received.
+                states:
+                    Sequence of observed states of the environment.
+                actions:
+                    Sequence of actions we took in the provided states.
+                rewards:
+                Sequence of rewards we received.
 
             Note:
                 len(states) must equal len(actions).
